@@ -2,15 +2,15 @@ import praw
 import OAuth2Util
 import time
 
-r = praw.Reddit("Plagiarism finder by /u/Captain_McFiesty ver 0.4")
-o = OAuth2Util.OAuth2Util(r)
-
-subreddit = r.get_subreddit('photoshopbattles')
-# submission = r.get_submission(submission_id='3fpml4')
-
 plag_names = []
 INTERVAL = 30 #minutes
 running = True
+subname = 'photoshopbattles'
+
+r = praw.Reddit("Plagiarism control by /u/Captain_McFiesty ver 0.4")
+o = OAuth2Util.OAuth2Util(r)
+
+subreddit = r.get_subreddit(subname)
 
 def check_comments(top):
     for comment in top:
@@ -47,7 +47,7 @@ def print_list(top):
     return
 
 def add_to_wiki():
-    wiki = r.get_wiki_page('photoshopbattles','plagnames')
+    wiki = r.get_wiki_page(subname,'plagnames')
     if (wiki.content_md == ''):
         text = 'Plagiarism users  \n'
     else:
@@ -67,12 +67,41 @@ def do_code():
             flat_comments = praw.helpers.flatten_tree(submission.comments)
             top_level = filter_comments(flat_comments)
             check_comments(top_level)
+            # print_list(top_level)
     add_to_wiki()
+    return
+
+def accept_invite():
+    for message in r.get_unread():
+    #for message in r.get_messages():
+            if(message.body.startswith('**gadzooks!')):
+                sr = r.get_info(thing_id=message.subreddit.fullname)
+                if(message.subreddit.display_name == subname):
+                    try:
+                        sr.accept_moderator_invite()
+                    except(praw.errors.InvalidInvite):
+                        continue
+                    message.mark_as_read()
     return
 
 while running:
     o.refresh()
-    localtime = time.asctime( time.localtime(time.time()) )
-    print("Time: ", localtime)
-    do_code()
+    print("Local time: ", time.asctime(time.localtime(time.time())))
+    try:
+        #accept_invite()
+        do_code()
+    except KeyboardInterrupt:
+        running = False
+    except (praw.errors.APIException):
+        print("[ERROR]:")
+        print("sleeping 30 sec")
+        sleep(30)
+    except (praw.errors.PRAWException):
+        print("Connection Error")
+        time.sleep(INTERVAL/2*60)
+        continue
+    except (Exception):
+        print("[ERROR]:")
+        print("blindly handling error")
+        break
     time.sleep(INTERVAL*60)
