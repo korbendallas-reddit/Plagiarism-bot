@@ -12,22 +12,24 @@ o = OAuth2Util.OAuth2Util(r)
 
 subreddit = r.get_subreddit(subname)
 
+
 def check_comments(top):
     for comment in top:
-        for comment2 in top:
-            if(comment2.author != None):
-                #print(comment2.author)
-                if (comment2.body == comment.body and
-                        comment.author != comment2.author and
-                        comment2.id != comment.id):
-                    if (comment2.created > comment.created and
-                           comment2.author.name not in plag_names):
-                        print('Plagiarism, id = %r, user = %r'
-                                  % (comment2.id, comment2.author.name))
-                        plag_names.append(comment2.author.name)
-                        #comment2.report('Bot report: Plagiarism suspected')
-                        subreddit.add_ban(comment2.author.name)
-                        comment2.remove(spam=False)
+        if(comment.author != None):
+            for comment2 in top:
+                if(comment2.author != None):
+                    #print(comment2.author)
+                    if (comment2.body == comment.body and
+                            comment.author.name != comment2.author.name and
+                            comment2.id != comment.id):
+                        if (comment2.created > comment.created and
+                               comment2.author.name not in plag_names):
+                            print('Plagiarism, id = %r, user = %r'
+                                      % (comment2.id, comment2.author.name))
+                            plag_names.append(comment2.author.name)
+                            #comment2.report('Bot report: Plagiarism suspected')
+                            subreddit.add_ban(comment2.author.name)
+                            comment2.remove(spam=False)
     return
 
 def filter_comments(flat_comments):
@@ -75,14 +77,17 @@ def accept_invite():
     for message in r.get_unread():
     #for message in r.get_messages():
             if(message.body.startswith('**gadzooks!')):
-                sr = r.get_info(thing_id=message.subreddit.fullname)
+                sub = r.get_info(thing_id=message.subreddit.fullname)
                 if(message.subreddit.display_name == subname):
                     try:
-                        sr.accept_moderator_invite()
+                        sub.accept_moderator_invite()
                     except(praw.errors.InvalidInvite):
                         continue
                     message.mark_as_read()
     return
+
+#accept_invite()
+#do_code()
 
 while running:
     o.refresh()
@@ -96,8 +101,11 @@ while running:
         print("[ERROR]:")
         print("sleeping 30 sec")
         sleep(30)
-    except (praw.errors.PRAWException):
+    except (praw.errors.HTTPException):
         print("Connection Error")
+        time.sleep(INTERVAL/2*60)
+    except (praw.errors.PRAWException):
+        print("PRAW Error")
         time.sleep(INTERVAL/2*60)
         continue
     except (Exception):
