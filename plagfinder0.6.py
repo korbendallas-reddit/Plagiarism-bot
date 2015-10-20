@@ -1,16 +1,24 @@
 import praw
 import OAuth2Util
 import time
+import requests
+import re
 
 plag_names = []
 INTERVAL = 30 #minutes
 running = True
 subname = 'photoshopbattles'
+backupsubname = 'plagiarismcontrol'
+user_pat = re.compile('/u/[A-Za-z0-9]+')
+SLEEPS = 24*60/INTERVAL #Number of times to sleep before checking SB
+slps = SLEEPS
+user_agent = "Plagiarism control by /u/Captain_McFiesty ver 0.6"
 
-r = praw.Reddit("Plagiarism control by /u/Captain_McFiesty ver 0.4")
+r = praw.Reddit(user_agent)
 o = OAuth2Util.OAuth2Util(r)
 
 subreddit = r.get_subreddit(subname)
+# submission = r.get_submission(submission_id='3fpml4') # test thread
 
 
 def check_comments(top):
@@ -35,6 +43,7 @@ def check_comments(top):
 def filter_comments(flat_comments):
     top_level = []
     for comment in flat_comments:
+        #print(vars(comment))
         if (comment.is_root and comment.banned_by == None):
             top_level.append(comment)
     #print_list(top_level)
@@ -48,16 +57,21 @@ def print_list(top):
     print('\n')
     return
 
-def add_to_wiki():
-    wiki = r.get_wiki_page(subname,'plagnames')
+def add_to_both_wiki():
+    add_to_wiki(subname);
+    add_to_wiki(backupsubname);
+    plag_names.clear()
+    return
+
+def add_to_wiki(sn):
+    wiki = r.get_wiki_page(sn,'plagnames')
     if (wiki.content_md == ''):
-        text = 'Plagiarism users  \n'
+        text = 'Plagiarism users  \r\n'
     else:
         text = wiki.content_md
     if(plag_names != []):
         for user in plag_names:
-            text += '/u/'+user+'  \n'
-        plag_names.clear()
+            text += '/u/'+user+'  \r\n'
         wiki.edit(text, 'Added plagiarism users')
     return
 
@@ -70,7 +84,7 @@ def do_code():
             top_level = filter_comments(flat_comments)
             check_comments(top_level)
             # print_list(top_level)
-    add_to_wiki()
+    add_to_both_wiki()
     return
 
 def accept_invite():
@@ -82,34 +96,89 @@ def accept_invite():
                     try:
                         sub.accept_moderator_invite()
                     except(praw.errors.InvalidInvite):
-                        continue
+                        pass
                     message.mark_as_read()
+    return
+
+def sleep_check():
+    global slps
+    #print(SLEEPS)
+    #print(slps)
+    
+    if(slps >= SLEEPS):
+        print("Checking for Shadowbans")
+        #print("inside")
+        clear_shadowbanned()
+        slps = 0
+    else:
+        #print("outside")
+        slps += 1
+    return
+
+def clear_shadowbanned():
+    #print("here")
+    wiki = r.get_wiki_page(backupsubname,'plagnames')
+    text = wiki.content_md
+    users = re.findall(user_pat, text)
+    new_text = ''
+    for user in users:
+        #print(user[3:])
+        if(check_user(user[3:])):
+            #print("found")
+            new_text += user+'  \r\n'
+            text = text.replace(user+'  \r\n', '')
+    if(new_text != ''):
+        #print("here 3")
+        add_shadowbanned(new_text)
+        #print(text)
+        wiki.edit(text, 'Removed shadowbanned users')
+    return
+
+def check_user(user_name):
+    try:
+        user = r.get_redditor(user_name)
+        karma = user.comment_karma # Throws an error if shadowbanned
+        return False
+    except:
+        return True
+    
+def add_shadowbanned(new_text):
+    wiki = r.get_wiki_page(backupsubname,'bannedplagnames')
+    text = wiki.content_md
+    text += new_text
+    wiki.edit(text, 'Added shadowbanned users')
     return
 
 #accept_invite()
 #do_code()
+#sleep_check()
 
 while running:
-    o.refresh()
     print("Local time: ", time.asctime(time.localtime(time.time())))
     try:
+        o.refresh()
         #accept_invite()
         do_code()
+        sleep_check()
     except KeyboardInterrupt:
         running = False
     except (praw.errors.APIException):
-        print("[ERROR]:")
-        print("sleeping 30 sec")
-        sleep(30)
+        print("[ERROR]: APIException")
     except (praw.errors.HTTPException):
-        print("Connection Error")
+        print("[ERROR]: HTTPException")
         time.sleep(INTERVAL/2*60)
+        continue
     except (praw.errors.PRAWException):
-        print("PRAW Error")
+        print("[ERROR]: PRAWException")
+        time.sleep(INTERVAL/2*60)
+        continue
+    except (requests.exceptions.ConnectionError):
+        print("Internet down")
         time.sleep(INTERVAL/2*60)
         continue
     except (Exception):
-        print("[ERROR]:")
-        print("blindly handling error")
+        print("[ERROR]: Other error")
         break
+    #print('done')
+    #running = False
     time.sleep(INTERVAL*60)
