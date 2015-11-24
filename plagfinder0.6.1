@@ -15,6 +15,7 @@ def Main():
 
     r = praw.Reddit(user_agent)
     o = OAuth2Util.OAuth2Util(r)
+    #acceptInvite(subname, r)
 
 
     ##### Main loop
@@ -27,9 +28,10 @@ def Main():
             commentsWithLinks = getCommentsWithLinks(subname, r)
 
             if commentsWithLinks:
-                plagiarisedLinks = removePlagiarisedLinks(commentsWithLinks)
+                plagiarisedLinks = findPlagiarisedLinks(commentsWithLinks, username, r)
                 if plagiarisedLinks:
                     updateWiki(subname, wikiPage, plagiarisedLinks, r)
+                    updateWiki(backupSubname, wikiPage, plagiarisedLinks, r)
 
         except (KeyboardInterrupt) as e:
             
@@ -92,7 +94,7 @@ def getCommentsWithLinks(subname, r):
 
 
 ##### Finds and removes plagiarised links and returns a list of the evil-doers comments
-def removePlagiarisedLinks(commentsWithLinks):
+def findPlagiarisedLinks(commentsWithLinks, subname, r):
 
     plagiarisedLinks = []
     
@@ -107,12 +109,36 @@ def removePlagiarisedLinks(commentsWithLinks):
                         if commentA[0] == commentB[0]:
                             if commentA[1].author.name != commentB[1].author.name:
                                 if commentA[1] not in plagiarisedLinks and commentB[1] not in plagiarisedLinks:
-                                    if commentA[1].created > commentB[1].created:
-                                        plagiarisedLinks.append(commentA[1])
-                                        commentA[1].remove(spam=False)
-                                    else:
-                                        plagiarisedLinks.append(commentB[1])
-                                        commentB[1].remove(spam=False)
+
+                                    # Matching links found
+                                    try:
+
+                                        # Remove 100% matches and add to list
+                                        if commentA[1].body == commentB[1].body:
+                                            if commentA[1].created > commentB[1].created:
+                                                plagiarisedLinks.append(commentA[1])
+                                                commentA[1].remove(spam=False)
+                                            else:
+                                                plagiarisedLinks.append(commentB[1])
+                                                commentB[1].remove(spam=False)
+                                                
+                                        # Report suspected matches, but don't add to list
+                                        else:
+                                            messageBody = 'Suspected Plagiarised Comment: \n\n'
+                                            if commentA[1].created > commentB[1].created:
+                                                messageBody += commentA[1].permalink
+                                                messageBody += '\n\n Original Comment: \n\n'
+                                                messageBody += commentB[1].permalink
+                                            else:
+                                                messageBody += '\n' + commentB[1].permalink + '\n'
+                                                messageBody += '\n Original Comment: \n'
+                                                messageBody += '\n' + commentA[1].permalink
+                                            r.send_message('/r/' + subname, 'Suspected Plagiarism', messageBody)
+                                                
+                                    except (Exception) as e:
+        
+                                        print e.message
+                                        
                                         
     except (Exception) as e:
         
@@ -150,6 +176,35 @@ def updateWiki(subname, wikiPage, plagiarisedLinks, r):
         print e.message
 
     
+    return
+
+
+def acceptInvite(subname, r):
+
+    try:
+        
+        for message in r.get_unread():
+    
+            if message.body.startswith('**gadzooks!'):
+                sub = r.get_info(thing_id=message.subreddit.fullname)
+                if message.subreddit.display_name == subname:
+                    
+                    try:
+                        
+                        sub.accept_moderator_invite()
+                        
+                    except (praw.errors.InvalidInvite) as e:
+    
+                        print e.message
+                        pass
+                
+                    message.mark_as_read()
+
+    except (Exception) as e:
+        
+        print e.message
+
+                
     return
 
 
