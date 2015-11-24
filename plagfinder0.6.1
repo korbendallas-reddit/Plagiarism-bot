@@ -78,14 +78,16 @@ def getCommentsWithLinks(subname, r):
         submissions = sub.get_hot(limit=5)
     
         for submission in submissions:
-            comments = submission.comments
+            submission.replace_more_comments(limit=None, threshold=0)
+            comments = praw.helpers.flatten_tree(submission.comments)
             if comments:
                 for comment in comments:
-                    linksCollector = re.compile('href="(.*?)"')
-                    links = linksCollector.findall(comment.body_html)
-                    if links:
-                        for link in links:
-                            commentsWithLinks.append([link, comment])
+                    if comment.is_root and comment.banned_by == None:
+                        linksCollector = re.compile('href="(.*?)"')
+                        links = linksCollector.findall(comment.body_html)
+                        if links:
+                            for link in links:
+                                commentsWithLinks.append([link, comment])
 
     except (Exception) as e:
         
