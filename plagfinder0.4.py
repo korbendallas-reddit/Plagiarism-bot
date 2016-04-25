@@ -1,115 +1,211 @@
-import praw
-import OAuth2Util
-import time
-
-plag_names = []
-INTERVAL = 30 #minutes
-running = True
-subname = 'photoshopbattles'
-
-r = praw.Reddit("Plagiarism control by /u/Captain_McFiesty ver 0.4")
-o = OAuth2Util.OAuth2Util(r)
-
-subreddit = r.get_subreddit(subname)
+import praw, OAuth2Util, time, re
 
 
-def check_comments(top):
-    for comment in top:
-        if(comment.author != None):
-            for comment2 in top:
-                if(comment2.author != None):
-                    #print(comment2.author)
-                    if (comment2.body == comment.body and
-                            comment.author.name != comment2.author.name and
-                            comment2.id != comment.id):
-                        if (comment2.created > comment.created and
-                               comment2.author.name not in plag_names):
-                            print('Plagiarism, id = %r, user = %r'
-                                      % (comment2.id, comment2.author.name))
-                            plag_names.append(comment2.author.name)
-                            #comment2.report('Bot report: Plagiarism suspected')
-                            subreddit.add_ban(comment2.author.name)
-                            comment2.remove(spam=False)
+def Main():
+
+    subname = 'korbendallas'
+    backupSubname = 'korbendallas'
+    username = '_korbendallas_'
+    user_agent = '_korbendallas_ by /u/_korbendallas_ ver 0.1'
+    wikiPage = 'plagnames'
+    interval = 30
+
+    r = praw.Reddit(user_agent)
+    o = OAuth2Util.praw.AuthenticatedReddit.login(r, disable_warning=True)
+    #acceptInvite(subname, r)
+
+
+    ##### Main loop
+    while True:
+
+        try:
+            
+            o.refresh()
+
+            commentsWithLinks = getCommentsWithLinks(subname, r)
+
+            if commentsWithLinks:
+                plagiarisedLinks = findPlagiarisedLinks(commentsWithLinks, username, r)
+                if plagiarisedLinks:
+                    updateWiki(subname, wikiPage, plagiarisedLinks, r)
+                    updateWiki(backupSubname, wikiPage, plagiarisedLinks, r)
+
+        except (KeyboardInterrupt) as e:
+            
+            print e.message
+            break
+
+        except (praw.errors.APIException) as e:
+            
+            print e.message
+            time.sleep(interval)
+
+        except (praw.errors.HTTPException) as e:
+            
+            print e.message
+            time.sleep(interval/2*60)
+
+        except (praw.errors.PRAWException) as e:
+            
+            print e.message
+            time.sleep(interval/2*60)
+
+        except (Exception) as e:
+            
+            print e.message
+            break
+
+        time.sleep(interval*60)
+        
+                
     return
 
-def filter_comments(flat_comments):
-    top_level = []
-    for comment in flat_comments:
-        if (comment.is_root and comment.banned_by == None):
-            top_level.append(comment)
-    #print_list(top_level)
-    return top_level
 
-def print_list(top):
-    print('\nTop Level List')
-    for c in top:
-        print(c.id)
-        print(c.author)
-    print('\n')
-    return
+##### Return a list of comments with links as a matrix
+##### Matrix format: [link, comment]
+def getCommentsWithLinks(subname, r):
 
-def add_to_wiki():
-    wiki = r.get_wiki_page(subname,'plagnames')
-    if (wiki.content_md == ''):
-        text = 'Plagiarism users  \n'
-    else:
-        text = wiki.content_md
-    if(plag_names != []):
-        for user in plag_names:
-            text += '/u/'+user+'  \n'
-        plag_names.clear()
-        wiki.edit(text, 'Added plagiarism users')
-    return
+    commentsWithLinks = []
 
-def do_code():
-    for submission in subreddit.get_hot(limit=5):
-        if submission.num_comments > 100:
-            print('Submission id: %r' % submission.id)
-            submission.replace_more_comments(limit=None, threshold=0)
-            flat_comments = praw.helpers.flatten_tree(submission.comments)
-            top_level = filter_comments(flat_comments)
-            check_comments(top_level)
-            # print_list(top_level)
-    add_to_wiki()
-    return
-
-def accept_invite():
-    for message in r.get_unread():
-    #for message in r.get_messages():
-            if(message.body.startswith('**gadzooks!')):
-                sub = r.get_info(thing_id=message.subreddit.fullname)
-                if(message.subreddit.display_name == subname):
-                    try:
-                        sub.accept_moderator_invite()
-                    except(praw.errors.InvalidInvite):
-                        continue
-                    message.mark_as_read()
-    return
-
-#accept_invite()
-#do_code()
-
-while running:
-    o.refresh()
-    print("Local time: ", time.asctime(time.localtime(time.time())))
     try:
-        #accept_invite()
-        do_code()
-    except KeyboardInterrupt:
-        running = False
-    except (praw.errors.APIException):
-        print("[ERROR]:")
-        print("sleeping 30 sec")
-        sleep(30)
-    except (praw.errors.HTTPException):
-        print("Connection Error")
-        time.sleep(INTERVAL/2*60)
-    except (praw.errors.PRAWException):
-        print("PRAW Error")
-        time.sleep(INTERVAL/2*60)
-        continue
-    except (Exception):
-        print("[ERROR]:")
-        print("blindly handling error")
-        break
-    time.sleep(INTERVAL*60)
+        
+        sub = r.get_subreddit(subname)
+        submissions = sub.get_hot(limit=5)
+    
+        for submission in submissions:
+            submission.replace_more_comments(limit=None, threshold=0)
+            comments = praw.helpers.flatten_tree(submission.comments)
+            if comments:
+                for comment in comments:
+                    if comment.is_root and comment.banned_by == None:
+                        linksCollector = re.compile('href="(.*?)"')
+                        links = linksCollector.findall(comment.body_html)
+                        if links:
+                            for link in links:
+                                commentsWithLinks.append([link, comment])
+
+    except (Exception) as e:
+        
+        print e.message
+
+
+    return commentsWithLinks
+
+
+##### Finds and removes plagiarised links and returns a list of the evil-doers comments
+def findPlagiarisedLinks(commentsWithLinks, subname, r):
+
+    plagiarisedLinks = []
+    
+    try:
+        
+        commentsWithLinksB = commentsWithLinks
+
+        for commentA in commentsWithLinks:
+            if commentA[1].author:
+                for commentB in commentsWithLinksB:
+                    if commentB[1].author:
+                        if commentA[0] == commentB[0]:
+                            if commentA[1].author.name != commentB[1].author.name:
+                                if commentA[1] not in plagiarisedLinks and commentB[1] not in plagiarisedLinks:
+
+                                    # Matching links found
+                                    try:
+
+                                        # Remove 100% matches and add to list
+                                        if commentA[1].body == commentB[1].body:
+                                            if commentA[1].created > commentB[1].created:
+                                                plagiarisedLinks.append(commentA[1])
+                                                commentA[1].remove(spam=False)
+                                            else:
+                                                plagiarisedLinks.append(commentB[1])
+                                                commentB[1].remove(spam=False)
+                                                
+                                        # Report suspected matches, but don't add to list
+                                        else:
+                                            messageBody = 'Suspected Plagiarised Comment: \n\n'
+                                            if commentA[1].created > commentB[1].created:
+                                                messageBody += commentA[1].permalink
+                                                messageBody += '\n\n Original Comment: \n\n'
+                                                messageBody += commentB[1].permalink
+                                            else:
+                                                messageBody += '\n' + commentB[1].permalink + '\n'
+                                                messageBody += '\n Original Comment: \n'
+                                                messageBody += '\n' + commentA[1].permalink
+                                            r.send_message('/r/' + subname, 'Suspected Plagiarism', messageBody)
+                                                
+                                    except (Exception) as e:
+        
+                                        print e.message
+                                        
+                                        
+    except (Exception) as e:
+        
+        print e.message
+
+    
+    return plagiarisedLinks
+
+
+##### Adds evil-doers to the wall of shame
+def updateWiki(subname, wikiPage, plagiarisedLinks, r):
+
+    try:
+        
+        wiki = r.get_wiki_page(subname, wikiPage)
+        wikiContents = wiki.content_md
+
+        newWikiContents = ''
+
+        if len(wikiContents) < 1:
+            newWikiContents = 'Plagiarism users  \n'
+        else:
+            newWikiContents = wikiContents
+
+        if plagiarisedLinks:
+            for plagiarisedLink in plagiarisedLinks:
+                user = '/u/' + plagiarisedLink.author.name + ' \n'
+                if user not in newWikiContents:
+                    newWikiContents += user
+
+            wiki.edit(newWikiContents, 'Added plagiarism users')
+            
+    except (Exception) as e:
+        
+        print e.message
+
+    
+    return
+
+
+def acceptInvite(subname, r):
+
+    try:
+        
+        for message in r.get_unread():
+    
+            if message.body.startswith('**gadzooks!'):
+                sub = r.get_info(thing_id=message.subreddit.fullname)
+                if message.subreddit.display_name == subname:
+                    
+                    try:
+                        
+                        sub.accept_moderator_invite()
+                        
+                    except (praw.errors.InvalidInvite) as e:
+    
+                        print e.message
+                        pass
+                
+                    message.mark_as_read()
+
+    except (Exception) as e:
+        
+        print e.message
+
+                
+    return
+
+
+
+Main()
